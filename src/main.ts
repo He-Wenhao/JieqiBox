@@ -1,5 +1,12 @@
 import { createApp } from 'vue'
 import App from './App.vue'
+import { attachConsole } from '@tauri-apps/plugin-log'
+
+// Forward all console.log/info/warn/error to Tauri's log plugin so they are
+// persisted to a file under ~/.local/share/com.jieqibox.app/logs/jieqibox.log
+// (Linux) — invaluable for debugging crashes or weird engine output after
+// the fact. Fails silently in non-Tauri environments (e.g. headless E2E).
+attachConsole().catch(() => {})
 
 // Import Vuetify
 import 'vuetify/styles'

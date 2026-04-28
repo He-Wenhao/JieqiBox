@@ -6,6 +6,7 @@ import { useConfigManager, type ManagedEngine } from './useConfigManager' // Imp
 import { useInterfaceSettings } from './useInterfaceSettings'
 import { useSoundEffects } from './useSoundEffects'
 import { uciToChineseMoves } from '@/utils/chineseNotation'
+import { checkMoveSanity } from '@/utils/moveSanity'
 import {
   evaluateAdvancedScript,
   type PrevContext,
@@ -205,6 +206,24 @@ export function useUciEngine(generateFen: () => string, gameState: any) {
         console.log(
           `[DEBUG] BESTMOVE_RECEIVED: '${mv}' ponder='${ponderMoveFromEngine}'. isThinking=${isThinking.value}, isStopping=${isStopping.value}.`
         )
+
+        // Sanity-check the engine's bestmove against current board state.
+        // The zero-NNUE engine (and any engine fed an inconsistent FEN) can
+        // suggest moves that violate basic invariants — wrong-side piece,
+        // self-capture, empty source. We log a clear warning so the user
+        // can see *why* the suggestion looks wrong.
+        if (mv && mv !== '(none)' && gameState.pieces?.value) {
+          const sanity = checkMoveSanity(
+            mv,
+            gameState.pieces.value,
+            gameState.sideToMove.value
+          )
+          if (!sanity.ok) {
+            console.warn(
+              `[ENGINE_SANITY] Engine bestmove '${mv}' rejected as ${sanity.reason}: ${sanity.detail}`
+            )
+          }
+        }
 
         // Refactored logic to handle stop confirmation as the highest priority.
         // This solves the race condition where 'ignoreNextBestMove' caused an early return,

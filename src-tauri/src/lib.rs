@@ -892,6 +892,22 @@ async fn paste_from_clipboard(_app: AppHandle) -> Result<String, String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(Arc::new(Mutex::new(None)) as EngineProcess)
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .clear_targets()
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Stdout,
+                ))
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("jieqibox".into()),
+                    },
+                ))
+                .level(log::LevelFilter::Info)
+                .max_file_size(50_000_000)
+                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
