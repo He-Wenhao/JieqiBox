@@ -1057,6 +1057,10 @@
   import { uciToChineseMoves } from '@/utils/chineseNotation'
   import { useGameSettings } from '@/composables/useGameSettings'
   import { useHumanVsAiSettings } from '@/composables/useHumanVsAiSettings'
+  import {
+    reclassifyDarkPieces,
+    MissingKingError,
+  } from '@/utils/darkPieces'
   import AboutDialog from './AboutDialog.vue'
   // Import Engine Manager components and types
   import EngineManagerDialog from './EngineManagerDialog.vue'
@@ -1739,15 +1743,29 @@
   // PositionEditorDialog.applyChanges does after switchSide() flips the dialog's
   // editingSideToMove. Critically includes recordAndFinalize + updateAllPieceZIndexes
   // — without those the board's FEN/render machinery (which keys off history,
-  // not raw sideToMove) doesn't observe the side change.
+  // not raw sideToMove) doesn't observe the side change. Also reclassifies dark
+  // pieces in case a prior recognition committed wrong classification.
   function handleSwitchSide() {
     switchSideClickCount.value++
     if (isThinking.value || isPondering.value) {
       handleStopAnalysis()
     }
-    // 1. Re-assign pieces (triggers watchers)
+    // 1. Re-assign pieces (triggers watchers). Try to reclassify dark pieces
+    //    using the king-based logic, so any stale misclassification is fixed.
+    //    If a king is missing we skip reclassification (still toggle the side)
+    //    and surface the error in the console — the side toggle itself is the
+    //    primary intent of this button.
     if (gameState?.pieces?.value) {
-      gameState.pieces.value = [...gameState.pieces.value]
+      try {
+        gameState.pieces.value = reclassifyDarkPieces(gameState.pieces.value)
+      } catch (e) {
+        if (e instanceof MissingKingError) {
+          console.warn('[switchSide] reclassify skipped:', e.message)
+          gameState.pieces.value = [...gameState.pieces.value]
+        } else {
+          throw e
+        }
+      }
     }
     // 2. Toggle side-to-move
     if (sideToMove) {

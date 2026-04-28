@@ -389,6 +389,7 @@
   import {
     getDarkRowsByKings as utilGetDarkRowsByKings,
     classifyUnknownByKings as utilClassifyUnknownByKings,
+    MissingKingError,
   } from '@/utils/darkPieces'
   import MersenneTwister from 'mersenne-twister'
   import type { Piece } from '@/composables/useChessGame'
@@ -607,7 +608,7 @@
         initialCol: piece.col,
       }))
       // Reclassify by king halves to avoid any flip-induced mislabeling
-      reclassifyAllDarkPieces()
+      tryReclassifyAllDarkPieces()
       editingSideToMove.value = gameState.sideToMove.value
       selectedPiece.value = null
       preserveDarkPools.value = false
@@ -644,14 +645,30 @@
   ): 'red_unknown' | 'black_unknown' =>
     utilClassifyUnknownByKings(editingPieces.value, row)
 
+  // Reclassify all dark pieces by king-based halves. Throws MissingKingError
+  // if either king is absent — callers can either let it propagate
+  // (user-facing "apply" paths) or use the safe wrapper below.
   const reclassifyAllDarkPieces = () => {
-    const { redRows } = getDarkRowsByKings()
+    const { redRows } = getDarkRowsByKings() // may throw MissingKingError
     editingPieces.value = editingPieces.value.map(p => {
       if (p.isKnown) return p
       const newName = redRows.includes(p.row) ? 'red_unknown' : 'black_unknown'
       if (p.name === newName) return p
       return { ...p, name: newName }
     })
+  }
+
+  // Defensive wrapper: try to reclassify, return false if a king is missing.
+  // Used by internal operations (mirror / flip / dialog-open / king-removal)
+  // where it's normal for pieces to temporarily be incomplete.
+  const tryReclassifyAllDarkPieces = (): boolean => {
+    try {
+      tryReclassifyAllDarkPieces()
+      return true
+    } catch (e) {
+      if (e instanceof MissingKingError) return false
+      throw e
+    }
   }
 
   // Select an existing piece
@@ -728,7 +745,7 @@
         selectedPiece.value.name === 'red_king' ||
         selectedPiece.value.name === 'black_king'
       ) {
-        reclassifyAllDarkPieces()
+        tryReclassifyAllDarkPieces()
       }
     } else {
       // It's a new piece from palette
@@ -784,7 +801,7 @@
     })
 
     // Reclassify dark pieces after coordinates change
-    reclassifyAllDarkPieces()
+    tryReclassifyAllDarkPieces()
 
     if (gameState.toggleBoardFlip) {
       gameState.toggleBoardFlip()
@@ -811,7 +828,7 @@
     })
 
     // Reclassify dark pieces after coordinates change
-    reclassifyAllDarkPieces()
+    tryReclassifyAllDarkPieces()
 
     // Do not change board flip orientation for left-right mirror
   }
@@ -847,7 +864,7 @@
 
           editingPieces.value = originalPieces
           // Ensure correct classification by king halves
-          reclassifyAllDarkPieces()
+          tryReclassifyAllDarkPieces()
           editingSideToMove.value = 'red'
         }, 0)
       }
@@ -1302,8 +1319,19 @@
       }
     }
 
-    // Reclassify dark pieces
-    reclassifyAllDarkPieces()
+    // Reclassify dark pieces. If recognition didn't detect a king, surface a
+    // visible error so the user knows the result is incomplete; the pieces
+    // are still applied (so the user can fix manually) but the dark-piece
+    // sides are left as the YOLO labels gave them.
+    try {
+      reclassifyAllDarkPieces()
+    } catch (e) {
+      if (e instanceof MissingKingError) {
+        recognitionStatus.value = `❌ ${e.message} Add the missing king before relying on dark-piece sides.`
+      } else {
+        throw e
+      }
+    }
   }
 
   const convertDetectionToPieceName = (
@@ -1417,6 +1445,20 @@
     // Auto-flip removed — it caused the board view to flip on plain operations
     // like switch-side+apply-changes when the user genuinely had red on top.
     // Users can still flip the view manually with the dialog's flip button.
+
+    // Always reclassify dark pieces before committing so the live board never
+    // inherits a stale (wrong) classification. If a king is missing, abort the
+    // apply with a visible error — better than silently committing a wrong
+    // classification and confusing the engine downstream.
+    try {
+      reclassifyAllDarkPieces()
+    } catch (e) {
+      if (e instanceof MissingKingError) {
+        recognitionStatus.value = `❌ ${e.message} Add the missing king to the board, then Apply Changes again.`
+        return
+      }
+      throw e
+    }
 
     // Calculate current unrevealed piece counts
     const newUnrevealedCounts: { [key: string]: number } = {}

@@ -3,6 +3,7 @@ import {
   getDarkRowsByKings,
   classifyUnknownByKings,
   reclassifyDarkPieces,
+  MissingKingError,
   type PieceLike,
 } from './darkPieces'
 
@@ -19,10 +20,35 @@ const k = (
 })
 
 describe('getDarkRowsByKings', () => {
-  it('default (no kings) → red bottom, black top', () => {
-    const { redRows, blackRows } = getDarkRowsByKings([])
-    expect(redRows).toEqual([5, 6, 7, 8, 9])
-    expect(blackRows).toEqual([0, 1, 2, 3, 4])
+  it('throws MissingKingError when no kings present', () => {
+    expect(() => getDarkRowsByKings([])).toThrow(MissingKingError)
+    try {
+      getDarkRowsByKings([])
+    } catch (e: any) {
+      expect(e.missing).toBe('both')
+    }
+  })
+
+  it('throws MissingKingError when red king is missing', () => {
+    expect(() => getDarkRowsByKings([k('black_king', 0)])).toThrow(
+      MissingKingError
+    )
+    try {
+      getDarkRowsByKings([k('black_king', 0)])
+    } catch (e: any) {
+      expect(e.missing).toBe('red')
+    }
+  })
+
+  it('throws MissingKingError when black king is missing', () => {
+    expect(() => getDarkRowsByKings([k('red_king', 9)])).toThrow(
+      MissingKingError
+    )
+    try {
+      getDarkRowsByKings([k('red_king', 9)])
+    } catch (e: any) {
+      expect(e.missing).toBe('black')
+    }
   })
 
   it('red king at row 9 (bottom, standard) → red rows = bottom', () => {
@@ -42,18 +68,6 @@ describe('getDarkRowsByKings', () => {
     expect(redRows).toEqual([0, 1, 2, 3, 4])
     expect(blackRows).toEqual([5, 6, 7, 8, 9])
   })
-
-  it('only black king at top → red rows = bottom (inferred)', () => {
-    const { redRows, blackRows } = getDarkRowsByKings([k('black_king', 1)])
-    expect(redRows).toEqual([5, 6, 7, 8, 9])
-    expect(blackRows).toEqual([0, 1, 2, 3, 4])
-  })
-
-  it('only black king at bottom → red rows = top (inferred)', () => {
-    const { redRows, blackRows } = getDarkRowsByKings([k('black_king', 8)])
-    expect(redRows).toEqual([0, 1, 2, 3, 4])
-    expect(blackRows).toEqual([5, 6, 7, 8, 9])
-  })
 })
 
 describe('classifyUnknownByKings', () => {
@@ -69,9 +83,8 @@ describe('classifyUnknownByKings', () => {
     expect(classifyUnknownByKings(pieces, 2)).toBe('black_unknown')
   })
 
-  it('no kings → defaults (red on bottom)', () => {
-    expect(classifyUnknownByKings([], 7)).toBe('red_unknown')
-    expect(classifyUnknownByKings([], 2)).toBe('black_unknown')
+  it('no kings → throws MissingKingError', () => {
+    expect(() => classifyUnknownByKings([], 7)).toThrow(MissingKingError)
   })
 })
 
@@ -101,6 +114,14 @@ describe('reclassifyDarkPieces', () => {
     ]
     const after = reclassifyDarkPieces(before)
     expect(after.find(p => p.name === 'red_pawn')).toBeDefined()
+  })
+
+  it('reclassifyDarkPieces propagates MissingKingError', () => {
+    const pieces: PieceLike[] = [
+      k('red_pawn', 6, 0, true), // no kings
+      k('black_unknown', 1, 0, false),
+    ]
+    expect(() => reclassifyDarkPieces(pieces)).toThrow(MissingKingError)
   })
 
   it('handles a fully red-on-top board (the user-reported scenario)', () => {
