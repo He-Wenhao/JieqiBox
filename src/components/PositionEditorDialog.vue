@@ -1272,12 +1272,23 @@
       await setStep('6/6 applying recognition results')
       applyRecognitionResults()
       await nextTick()
-      // The integrated workflow wants the main board to mirror exactly what
-      // the editor showed. Editor renders pieces at their raw .row, so force
-      // isBoardFlipped=false on the main board and skip the auto-flip path.
-      if (gameState?.isBoardFlipped?.value) {
-        gameState.isBoardFlipped.value = false
+
+      // If the screenshot was taken from black's perspective (red king ended
+      // up in rows 0–4 of the model), the resulting position is *invalid* in
+      // Xiangqi (red king must be in the palace rows 7–9). Pikafish will
+      // either reject the FEN or analyze a corrupt position. flipBoard()
+      // mirrors all piece rows (red king → row 9) AND toggles isBoardFlipped
+      // so the user still sees red on top — matching their screenshot — while
+      // the engine receives a valid red-on-bottom position internally.
+      const redKingAfter = editingPieces.value.find(
+        p => p.isKnown && p.name === 'red_king'
+      )
+      if (redKingAfter && redKingAfter.row < 5) {
+        await setStep('auto-orienting (red detected on top → mirroring rows)')
+        flipBoard()
+        await nextTick()
       }
+
       await setStep('done — committing changes to main board')
       applyChanges({ skipAutoFlip: true })
     } catch (e) {
