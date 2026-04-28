@@ -390,6 +390,7 @@
     getDarkRowsByKings as utilGetDarkRowsByKings,
     classifyUnknownByKings as utilClassifyUnknownByKings,
     needsVerticalMirror,
+    mirrorPiecesVertically,
     MissingKingError,
   } from '@/utils/darkPieces'
   import MersenneTwister from 'mersenne-twister'
@@ -1274,15 +1275,22 @@
       applyRecognitionResults()
       await nextTick()
 
-      // If the screenshot was taken from black's perspective (red king ended
-      // up in rows 0–4 of the model), the resulting position is *invalid* in
-      // Xiangqi. flipBoard() mirrors piece rows (red king → row 9) AND toggles
-      // isBoardFlipped so the user still sees their captured orientation
-      // while the engine receives a valid red-on-bottom position internally.
-      // Verified by the unit-tested needsVerticalMirror predicate.
+      // If the screenshot was taken from black's perspective (red king is in
+      // rows 0–4 of the model), the position is invalid for Xiangqi/Pikafish
+      // (red king must live in the red palace at rows 7–9). We mirror the
+      // pieces in-place (so the engine receives a valid red-on-bottom model)
+      // and set isBoardFlipped=true so the user still sees their captured
+      // orientation. We deliberately avoid calling the dialog's flipBoard()
+      // here — it invokes gameState.toggleBoardFlip() which mirrors
+      // gameState.pieces a second time and triggers a watcher chain (sound,
+      // user-drawings flip, opening-book query) that has reentrancy issues
+      // mid-workflow and was producing "Maximum call stack size exceeded".
       if (needsVerticalMirror(editingPieces.value)) {
         await setStep('auto-orienting (red detected on top → mirroring rows)')
-        flipBoard()
+        editingPieces.value = mirrorPiecesVertically(editingPieces.value)
+        if (gameState?.isBoardFlipped) {
+          gameState.isBoardFlipped.value = !gameState.isBoardFlipped.value
+        }
         await nextTick()
       }
 
