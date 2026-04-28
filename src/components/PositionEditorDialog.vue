@@ -389,6 +389,7 @@
   import {
     getDarkRowsByKings as utilGetDarkRowsByKings,
     classifyUnknownByKings as utilClassifyUnknownByKings,
+    needsVerticalMirror,
     MissingKingError,
   } from '@/utils/darkPieces'
   import MersenneTwister from 'mersenne-twister'
