@@ -90,3 +90,42 @@ export function reclassifyDarkPieces<T extends PieceLike>(pieces: T[]): T[] {
     return { ...p, name: newName }
   })
 }
+
+/**
+ * Whether the recognized board needs to be vertically mirrored before being
+ * sent to the engine. In Xiangqi, the red king must live in the red palace
+ * (rows 7–9 in model coords). When a screenshot is taken from black's
+ * perspective, recognition puts the red king at rows 0–4. Mirroring restores
+ * a valid model orientation; the *view* should be flipped at the same time
+ * so the user still sees what they captured.
+ *
+ * Returns false when there's no red king (caller will surface a missing-king
+ * error elsewhere — we don't want to flip on incomplete data).
+ */
+export function needsVerticalMirror(pieces: PieceLike[]): boolean {
+  const redKing = pieces.find(p => p.isKnown && p.name === 'red_king')
+  if (!redKing) return false
+  return redKing.row < 5
+}
+
+/**
+ * Mirror every piece's row and column so a position recognized from black's
+ * perspective becomes valid model coords (red on bottom, black on top).
+ * Mirrors `initialRow` / `initialCol` too if they exist.
+ */
+export function mirrorPiecesVertically<T extends PieceLike>(pieces: T[]): T[] {
+  return pieces.map(p => {
+    const mirrored: any = {
+      ...p,
+      row: 9 - p.row,
+      col: 8 - p.col,
+    }
+    if ((p as any).initialRow !== undefined) {
+      mirrored.initialRow = 9 - (p as any).initialRow
+    }
+    if ((p as any).initialCol !== undefined) {
+      mirrored.initialCol = 8 - (p as any).initialCol
+    }
+    return mirrored
+  })
+}

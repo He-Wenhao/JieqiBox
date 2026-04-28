@@ -3,6 +3,8 @@ import {
   getDarkRowsByKings,
   classifyUnknownByKings,
   reclassifyDarkPieces,
+  needsVerticalMirror,
+  mirrorPiecesVertically,
   MissingKingError,
   type PieceLike,
 } from './darkPieces'
@@ -116,12 +118,91 @@ describe('reclassifyDarkPieces', () => {
     expect(after.find(p => p.name === 'red_pawn')).toBeDefined()
   })
 
+  it('end-to-end orient invariant: after maybe-mirroring, red king is always in rows 5–9', () => {
+    // Generate every reasonable red-king starting position (rows 0–9, col 4)
+    // and check the post-orient row is in the red half. This is the actual
+    // "Pikafish accepts this FEN" invariant we care about.
+    for (let startRow = 0; startRow <= 9; startRow++) {
+      const pieces: PieceLike[] = [
+        { name: 'red_king', row: startRow, col: 4, isKnown: true },
+        { name: 'black_king', row: 9 - startRow, col: 4, isKnown: true },
+      ]
+      const oriented = needsVerticalMirror(pieces)
+        ? mirrorPiecesVertically(pieces)
+        : pieces
+      const redK = oriented.find(p => p.name === 'red_king')!
+      expect(redK.row, `start row ${startRow}`).toBeGreaterThanOrEqual(5)
+    }
+  })
+
+  it('mirrorPiecesVertically mirrors initialRow/initialCol if present', () => {
+    const before = [
+      {
+        name: 'red_king',
+        row: 0,
+        col: 4,
+        isKnown: true,
+        initialRow: 0,
+        initialCol: 4,
+      } as any,
+    ]
+    const after = mirrorPiecesVertically(before)
+    expect(after[0].row).toBe(9)
+    expect(after[0].col).toBe(4)
+    expect(after[0].initialRow).toBe(9)
+    expect(after[0].initialCol).toBe(4)
+  })
+
+  it('needsVerticalMirror returns false when no red king (caller surfaces error)', () => {
+    expect(needsVerticalMirror([])).toBe(false)
+    expect(
+      needsVerticalMirror([{ name: 'black_king', row: 0, col: 4, isKnown: true }])
+    ).toBe(false)
+  })
+
+  it('needsVerticalMirror returns false when red king is on bottom (no flip needed)', () => {
+    expect(
+      needsVerticalMirror([
+        { name: 'red_king', row: 9, col: 4, isKnown: true },
+        { name: 'black_king', row: 0, col: 4, isKnown: true },
+      ])
+    ).toBe(false)
+  })
+
   it('reclassifyDarkPieces propagates MissingKingError', () => {
     const pieces: PieceLike[] = [
       k('red_pawn', 6, 0, true), // no kings
       k('black_unknown', 1, 0, false),
     ]
     expect(() => reclassifyDarkPieces(pieces)).toThrow(MissingKingError)
+  })
+
+  it('user-reported scenario: red-on-top capture, after mirror engine sees valid red-on-bottom', () => {
+    // Phone screenshot was taken from black's perspective: red is at the top
+    // of the image, so YOLO records red pieces at rows 0–4 in the model.
+    // Pikafish would reject this (red king must be at rows 7–9). The fix:
+    // detect via needsVerticalMirror, then mirrorPiecesVertically.
+    const recognized: PieceLike[] = [
+      { name: 'red_king', row: 0, col: 4, isKnown: true },
+      { name: 'black_king', row: 9, col: 4, isKnown: true },
+      { name: 'red_chariot', row: 0, col: 0, isKnown: true },
+      { name: 'black_pawn', row: 6, col: 0, isKnown: true },
+      { name: 'red_unknown', row: 1, col: 2, isKnown: false }, // dark on red side
+    ]
+    expect(needsVerticalMirror(recognized)).toBe(true)
+    const mirrored = mirrorPiecesVertically(recognized)
+    const redK = mirrored.find(p => p.name === 'red_king')!
+    const blackK = mirrored.find(p => p.name === 'black_king')!
+    // Red king must be in the red palace rows (7–9) for Pikafish to accept it.
+    expect(redK.row).toBeGreaterThanOrEqual(7)
+    expect(redK.row).toBeLessThanOrEqual(9)
+    // Black king must be in the black palace rows (0–2).
+    expect(blackK.row).toBeGreaterThanOrEqual(0)
+    expect(blackK.row).toBeLessThanOrEqual(2)
+    // Specifically: row 0 ↔ row 9, col 4 stays mirror-symmetric.
+    expect(redK.row).toBe(9)
+    expect(blackK.row).toBe(0)
+    expect(redK.col).toBe(4)
   })
 
   it('handles a fully red-on-top board (the user-reported scenario)', () => {
