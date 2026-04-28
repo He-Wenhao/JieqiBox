@@ -20,6 +20,16 @@
         :title="$t('toolbar.editPosition')"
       />
       <v-btn
+        icon="mdi-cellphone-arrow-down"
+        size="small"
+        color="green-darken-2"
+        variant="text"
+        @click="handleCaptureFromPhone"
+        :disabled="isMatchRunning"
+        :loading="isCapturingFromPhone"
+        :title="$t('toolbar.captureFromPhone')"
+      />
+      <v-btn
         icon="mdi-view-dashboard-outline"
         size="small"
         color="lime"
@@ -136,6 +146,7 @@
       @settings-changed="handleSettingsChanged"
     />
     <PositionEditorDialog
+      ref="positionEditorRef"
       v-model="showPositionEditor"
       @position-changed="handlePositionChanged"
     />
@@ -151,7 +162,7 @@
 </template>
 
 <script setup lang="ts">
-  import { ref, inject, computed, onUnmounted, watch } from 'vue'
+  import { ref, inject, computed, onUnmounted, watch, nextTick } from 'vue'
   import { useI18n } from 'vue-i18n'
   import UciOptionsDialog from './UciOptionsDialog.vue'
   import TimeDialog from './TimeDialog.vue'
@@ -192,6 +203,22 @@
   const isSaving = ref(false)
   const isOpening = ref(false)
   const isApplyingText = ref(false)
+
+  // Phone-capture one-shot flow
+  const positionEditorRef = ref<any>(null)
+  const isCapturingFromPhone = ref(false)
+  const handleCaptureFromPhone = async () => {
+    if (isCapturingFromPhone.value) return
+    isCapturingFromPhone.value = true
+    try {
+      showPositionEditor.value = true
+      // Wait for the dialog component instance to mount and expose its methods
+      await nextTick()
+      await positionEditorRef.value?.runAdbCaptureFlow()
+    } finally {
+      isCapturingFromPhone.value = false
+    }
+  }
 
   // Review analysis managed in ReviewAnalysisDialog
 

@@ -72,6 +72,16 @@
             : $t('analysis.startAnalysis')
         }}
       </v-btn>
+      <v-btn
+        @click="handleSwitchSide"
+        color="secondary"
+        class="grouped-btn"
+        size="small"
+      >
+        {{ $t('positionEditor.switchSide') }} ({{ currentSideLabel }}) #{{
+          switchSideClickCount
+        }}
+      </v-btn>
     </div>
 
     <!-- Match mode button groups -->
@@ -1713,6 +1723,57 @@
       playInterval.value = null
     }
     isPlaying.value = false
+  }
+
+  // Live label of who's to move, shown in the switch-side button so the user
+  // can see the toggle take effect. Counter is bumped on every click so the
+  // user can confirm the click event itself fires.
+  const switchSideClickCount = ref(0)
+  const currentSideLabel = computed(() =>
+    sideToMove?.value === 'red'
+      ? t('positionEditor.redToMove')
+      : t('positionEditor.blackToMove')
+  )
+
+  // Toggle whose side moves next. Replicates exactly what
+  // PositionEditorDialog.applyChanges does after switchSide() flips the dialog's
+  // editingSideToMove. Critically includes recordAndFinalize + updateAllPieceZIndexes
+  // — without those the board's FEN/render machinery (which keys off history,
+  // not raw sideToMove) doesn't observe the side change.
+  function handleSwitchSide() {
+    switchSideClickCount.value++
+    if (isThinking.value || isPondering.value) {
+      handleStopAnalysis()
+    }
+    // 1. Re-assign pieces (triggers watchers)
+    if (gameState?.pieces?.value) {
+      gameState.pieces.value = [...gameState.pieces.value]
+    }
+    // 2. Toggle side-to-move
+    if (sideToMove) {
+      sideToMove.value = sideToMove.value === 'red' ? 'black' : 'red'
+    }
+    // 3. Reset zIndex of pieces (cosmetic, mirrors applyChanges)
+    if (gameState?.pieces?.value) {
+      gameState.pieces.value.forEach((p: any) => {
+        p.zIndex = undefined
+      })
+    }
+    if (typeof gameState?.updateAllPieceZIndexes === 'function') {
+      gameState.updateAllPieceZIndexes()
+    }
+    // 4. Record into history — THIS is what makes downstream observers (FEN,
+    //    engine analysis, board re-render) actually see the change.
+    if (typeof gameState?.recordAndFinalize === 'function') {
+      gameState.recordAndFinalize('adjust', 'switch_side')
+    }
+    // 5. Clear arrows + force-stop AI
+    if (typeof gameState?.triggerArrowClear === 'function') {
+      gameState.triggerArrowClear()
+    }
+    window.dispatchEvent(
+      new CustomEvent('force-stop-ai', { detail: { reason: 'switch-side' } })
+    )
   }
 
   // Handle analysis button click - start analysis or stop analysis based on current state

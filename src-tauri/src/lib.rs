@@ -265,6 +265,42 @@ async fn clear_config(app: AppHandle) -> Result<(), String> {
     }
 }
 
+/// Capture the connected Android device's screen via `adb exec-out screencap -p`
+/// and return the PNG bytes as raw binary (`tauri::ipc::Response`). The JS side
+/// receives an ArrayBuffer — no base64 round-trip. Used by the "capture from
+/// phone" one-click recognition workflow.
+#[tauri::command]
+async fn capture_phone_screen() -> Result<tauri::ipc::Response, String> {
+    // Run adb on a blocking-friendly thread so we don't stall Tauri's async runtime
+    // while screencap is in flight (500 ms – 2 s typical on USB).
+    let output = tauri::async_runtime::spawn_blocking(|| {
+        Command::new("adb")
+            .args(["exec-out", "screencap", "-p"])
+            .output()
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking join error: {}", e))?
+    .map_err(|e| format!("Failed to run adb (is it installed and on PATH?): {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "adb screencap failed (status {}): {}",
+            output.status,
+            stderr.trim()
+        ));
+    }
+
+    if output.stdout.len() < 100 {
+        return Err(
+            "adb returned no image. Plug in a device, run `adb devices`, and authorize USB debugging."
+                .to_string(),
+        );
+    }
+
+    Ok(tauri::ipc::Response::new(output.stdout))
+}
+
 /// Save game notation to autosave file.
 #[tauri::command]
 async fn save_autosave(content: String, app: AppHandle) -> Result<(), String> {
@@ -873,6 +909,7 @@ pub fn run() {
             save_game_notation_with_dialog,
             copy_to_clipboard,
             paste_from_clipboard,
+            capture_phone_screen,
             // Opening book commands
             opening_book_add_entry,
             opening_book_delete_entry,

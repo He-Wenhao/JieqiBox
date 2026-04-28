@@ -28,6 +28,7 @@ export default {
     copyFen: 'Copy FEN',
     inputFen: 'Input FEN',
     editPosition: 'Edit Position',
+    captureFromPhone: '📱 Capture from Phone (one-click recognize)',
     uciSettings: 'UCI Settings',
     analysisParams: 'Analysis Parameters',
     saveNotation: 'Save Notation',

@@ -158,13 +158,15 @@
                         v-if="recognitionStatus"
                         :type="
                           recognitionStatus.includes('失败') ||
-                          recognitionStatus.includes('错误')
+                          recognitionStatus.includes('错误') ||
+                          recognitionStatus.includes('ERROR')
                             ? 'error'
                             : 'info'
                         "
                         variant="tonal"
                         density="compact"
                         class="mb-2"
+                        style="white-space: pre-line; font-family: monospace"
                       >
                         {{ recognitionStatus }}
                       </v-alert>
@@ -383,6 +385,7 @@
 <script setup lang="ts">
   import { ref, computed, inject, watch, nextTick } from 'vue'
   import { useI18n } from 'vue-i18n'
+  import { invoke } from '@tauri-apps/api/core'
   import MersenneTwister from 'mersenne-twister'
   import type { Piece } from '@/composables/useChessGame'
   import { START_FEN, INITIAL_PIECE_COUNTS, FEN_MAP } from '@/utils/constants'
@@ -1230,6 +1233,92 @@
     }
   }
 
+  /**
+   * One-shot workflow: capture the connected Android device's screen via adb,
+   * feed it into the YOLO recognizer, and apply the detected board to the
+   * editing area. Stops short of `applyChanges` so the user can verify before
+   * committing.
+   */
+  const runAdbCaptureFlow = async () => {
+    // Accumulate every step into the UI's status alert so the user sees a full
+    // history (and the freeze point) even with devtools closed. A short pause
+    // after each step keeps fast steps visually distinct.
+    const log: string[] = []
+    const setStep = async (s: string) => {
+      console.log('[adb-capture]', s)
+      log.push(`[${new Date().toLocaleTimeString()}] ${s}`)
+      recognitionStatus.value = log.join('\n')
+      await nextTick()
+      // No artificial pause — the workflow steps are fast enough on their own.
+    }
+    await setStep('1/6 starting flow')
+    showImageRecognition.value = true
+    try {
+      await setStep('2/6 invoking capture_phone_screen (adb screencap)')
+      // Rust returns a tauri::ipc::Response with raw bytes → ArrayBuffer here.
+      const buf = (await invoke('capture_phone_screen')) as ArrayBuffer
+      await setStep(`3/6 got PNG bytes (${buf.byteLength} B)`)
+
+      const file = new File([buf], 'phone-capture.png', { type: 'image/png' })
+
+      await setStep('4/6 loading image into recognizer')
+      await loadImage(file)
+      await nextTick()
+      await setStep(
+        '5/6 running YOLO inference (auto: re-do canvas→blob→processImage)'
+      )
+
+      // Inline an awaitable equivalent of processCurrentImage so we can chain
+      // applyRecognitionResults afterward. We deliberately do NOT touch the
+      // original processCurrentImage (manual button) — keeping its
+      // fire-and-forget canvas.toBlob behavior unchanged.
+      if (!inputImage.value) throw new Error('input image lost after loadImage')
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')!
+      canvas.width = inputImage.value.naturalWidth
+      canvas.height = inputImage.value.naturalHeight
+      ctx.drawImage(inputImage.value, 0, 0)
+      const blob = await new Promise<Blob | null>(r =>
+        canvas.toBlob(r, 'image/jpeg')
+      )
+      if (!blob) throw new Error('canvas.toBlob returned null')
+      const jpegFile = new File([blob], 'chessboard.jpg', {
+        type: 'image/jpeg',
+      })
+      await processImage(jpegFile)
+      await nextTick()
+      detectedBoxes.value = recognitionDetectedBoxes.value
+      boardGrid.value = updateBoardGrid(detectedBoxes.value)
+      await nextTick()
+      if (imageDisplayRef.value && canvasRef.value) {
+        drawBoundingBoxes(
+          detectedBoxes.value,
+          imageDisplayRef.value,
+          canvasRef.value
+        )
+      }
+
+      await setStep('6/6 applying recognition results')
+      applyRecognitionResults()
+      await nextTick()
+      // The integrated workflow wants the main board to mirror exactly what
+      // the editor showed. Editor renders pieces at their raw .row, so force
+      // isBoardFlipped=false on the main board and skip the auto-flip path.
+      if (gameState?.isBoardFlipped?.value) {
+        gameState.isBoardFlipped.value = false
+      }
+      await setStep('done — committing changes to main board')
+      applyChanges({ skipAutoFlip: true })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      console.error('[adb-capture] flow failed:', e)
+      log.push(`ERROR: ${msg}`)
+      recognitionStatus.value = log.join('\n')
+    }
+  }
+
+  defineExpose({ runAdbCaptureFlow })
+
   const applyRecognitionResults = () => {
     if (!boardGrid.value) return
 
@@ -1357,45 +1446,23 @@
     }
   }
 
-  // Apply changes with dark piece pool adjustment and auto-flip if needed
-  const applyChanges = () => {
+  // Apply changes with dark piece pool adjustment and auto-flip if needed.
+  // Pass `{ skipAutoFlip: true }` to suppress the auto-flip toggle (used by the
+  // integrated phone-capture workflow, which wants the main board to match the
+  // exact orientation the editor was showing).
+  const applyChanges = (opts?: { skipAutoFlip?: boolean }) => {
+    // The manual "Apply Changes" button binds via @click, which passes a
+    // MouseEvent as the first arg — guard against that being interpreted as
+    // an options object.
+    const skipAutoFlip =
+      opts && typeof opts === 'object' && !('preventDefault' in opts)
+        ? !!opts.skipAutoFlip
+        : false
     if (validationStatus.value.type !== 'success') return
 
-    // Check if auto-flip is needed based on king positions
-    const isInRedPalace = (row: number, col: number) =>
-      row >= 7 && row <= 9 && col >= 3 && col <= 5
-    const isInBlackPalace = (row: number, col: number) =>
-      row >= 0 && row <= 2 && col >= 3 && col <= 5
-
-    const redKing = editingPieces.value.find(
-      p => p.isKnown && p.name === 'red_king'
-    )
-    const blackKing = editingPieces.value.find(
-      p => p.isKnown && p.name === 'black_king'
-    )
-
-    let needsAutoFlip = false
-    if (redKing && blackKing) {
-      const redKingInWrongPalace =
-        !isInRedPalace(redKing.row, redKing.col) &&
-        isInBlackPalace(redKing.row, redKing.col)
-      const blackKingInWrongPalace =
-        !isInBlackPalace(blackKing.row, blackKing.col) &&
-        isInRedPalace(blackKing.row, blackKing.col)
-
-      // Check if kings are in opposite positions (red on top, black on bottom)
-      const redKingOnTop = redKing.row < 5
-      const blackKingOnBottom = blackKing.row >= 5
-      const kingsInOppositePositions = redKingOnTop && blackKingOnBottom
-
-      if (
-        redKingInWrongPalace ||
-        blackKingInWrongPalace ||
-        kingsInOppositePositions
-      ) {
-        needsAutoFlip = true
-      }
-    }
+    // Auto-flip removed — it caused the board view to flip on plain operations
+    // like switch-side+apply-changes when the user genuinely had red on top.
+    // Users can still flip the view manually with the dialog's flip button.
 
     // Calculate current unrevealed piece counts
     const newUnrevealedCounts: { [key: string]: number } = {}
@@ -1447,10 +1514,8 @@
     gameState.pieces.value = editingPieces.value
     gameState.sideToMove.value = editingSideToMove.value
 
-    // Auto-flip board if needed
-    if (needsAutoFlip && gameState.toggleBoardFlip) {
-      gameState.toggleBoardFlip()
-    }
+    // (Auto-flip removed — see note above.)
+    void skipAutoFlip
 
     // Update unrevealed piece counts unless user opts to preserve
     if (!preserveDarkPools.value && gameState.unrevealedPieceCounts) {
@@ -1468,7 +1533,7 @@
     }
 
     // Record the edit operation in history
-    const editData = `position_edit:${editingPieces.value.length}_pieces${needsAutoFlip ? '_with_flip' : ''}`
+    const editData = `position_edit:${editingPieces.value.length}_pieces`
     if (gameState.recordAndFinalize) {
       gameState.recordAndFinalize('adjust', editData)
     }

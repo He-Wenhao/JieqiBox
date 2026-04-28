@@ -28,6 +28,7 @@ export default {
     copyFen: '复制FEN',
     inputFen: '输入FEN',
     editPosition: '编辑局面',
+    captureFromPhone: '📱 一键识别（从手机截图）',
     uciSettings: 'UCI设置',
     analysisParams: '分析参数',
     saveNotation: '保存棋谱',
