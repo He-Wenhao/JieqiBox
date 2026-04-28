@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "node e2e/run.cjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",
@@ -39,6 +40,7 @@
     "@vue/test-utils": "^2.4.9",
     "happy-dom": "^20.9.0",
     "prettier": "^3.6.2",
+    "puppeteer-core": "^24.42.0",
     "sass-embedded": "^1.89.2",
     "typescript": "~5.6.2",
     "vite": "^6.0.3",
