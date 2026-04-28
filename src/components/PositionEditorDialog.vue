@@ -386,6 +386,10 @@
   import { ref, computed, inject, watch, nextTick } from 'vue'
   import { useI18n } from 'vue-i18n'
   import { invoke } from '@tauri-apps/api/core'
+  import {
+    getDarkRowsByKings as utilGetDarkRowsByKings,
+    classifyUnknownByKings as utilClassifyUnknownByKings,
+  } from '@/utils/darkPieces'
   import MersenneTwister from 'mersenne-twister'
   import type { Piece } from '@/composables/useChessGame'
   import { START_FEN, INITIAL_PIECE_COUNTS, FEN_MAP } from '@/utils/constants'
@@ -632,64 +636,14 @@
   }
 
   // Helper: compute dark rows for each side based on king positions
-  const getDarkRowsByKings = () => {
-    const topRegion = [0, 1, 2, 3, 4]
-    const bottomRegion = [5, 6, 7, 8, 9]
+  const getDarkRowsByKings = () =>
+    utilGetDarkRowsByKings(editingPieces.value)
 
-    const redKing = editingPieces.value.find(
-      p => p.isKnown && p.name === 'red_king'
-    )
-    const blackKing = editingPieces.value.find(
-      p => p.isKnown && p.name === 'black_king'
-    )
-
-    // Defaults: red bottom, black top
-    let redRows = bottomRegion.slice()
-    let blackRows = topRegion.slice()
-
-    const isInTop = (row: number) => topRegion.includes(row)
-    const isInBottom = (row: number) => bottomRegion.includes(row)
-
-    if (redKing) {
-      if (isInTop(redKing.row)) {
-        redRows = topRegion.slice()
-        blackRows = bottomRegion.slice()
-      } else if (isInBottom(redKing.row)) {
-        redRows = bottomRegion.slice()
-        blackRows = topRegion.slice()
-      } else if (blackKing) {
-        // Red king in middle rows, decide by black king if possible
-        if (isInTop(blackKing.row)) {
-          blackRows = topRegion.slice()
-          redRows = bottomRegion.slice()
-        } else if (isInBottom(blackKing.row)) {
-          blackRows = bottomRegion.slice()
-          redRows = topRegion.slice()
-        }
-      }
-    } else if (blackKing) {
-      // Red king missing, decide by black king
-      if (isInTop(blackKing.row)) {
-        blackRows = topRegion.slice()
-        redRows = bottomRegion.slice()
-      } else if (isInBottom(blackKing.row)) {
-        blackRows = bottomRegion.slice()
-        redRows = topRegion.slice()
-      }
-    }
-
-    return { redRows, blackRows }
-  }
-
-  // Helper: classify unknown color by king-based halves
   const classifyUnknownByKings = (
     row: number
-  ): 'red_unknown' | 'black_unknown' => {
-    const { redRows } = getDarkRowsByKings()
-    return redRows.includes(row) ? 'red_unknown' : 'black_unknown'
-  }
+  ): 'red_unknown' | 'black_unknown' =>
+    utilClassifyUnknownByKings(editingPieces.value, row)
 
-  // Helper: reclassify all dark piece names according to current king-based halves
   const reclassifyAllDarkPieces = () => {
     const { redRows } = getDarkRowsByKings()
     editingPieces.value = editingPieces.value.map(p => {
